@@ -12,7 +12,7 @@ MJJBOX 自动签到脚本
   MJJBOX_EMAIL
   MJJBOX_PASSWORD
 
-  # Telegram（可选）
+  # Telegram（可选，用于汇总推送）
   TELEGRAM_BOT_TOKEN
   TELEGRAM_CHAT_ID
 
@@ -36,6 +36,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
+
 # 日志配置
 logging.basicConfig(
     level=logging.INFO,
@@ -53,9 +54,6 @@ class MJJBoxAutoCheckin:
         self.password = password
 
         self.base_url = os.getenv("MJJBOX_BASE_URL", "https://mjjbox.com").rstrip("/")
-        self.telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-        self.telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
-
         self.driver = None
         self.setup_driver()
 
@@ -132,7 +130,7 @@ class MJJBoxAutoCheckin:
 
         time.sleep(1)
 
-        # 登录按钮，你之前改过的选择器
+        # 登录按钮，你改过的选择器
         login_button_selectors = [
             "#login-button",
             "button.btn-primary",
@@ -171,7 +169,7 @@ class MJJBoxAutoCheckin:
         logger.info(f"登录完成，当前 URL: {self.driver.current_url}")
         return True
 
-    # ========== CSRF & 签到请求 ==========
+    # ========== CSRF & /checkin 请求 ==========
 
     def get_csrf_token(self) -> str:
         """
@@ -234,7 +232,7 @@ class MJJBoxAutoCheckin:
 
         logger.info(f"签到响应 HTTP 状态码：{status}")
 
-        # 参照你油猴脚本的逻辑：422 代表校验失败 / 已签到等
+        # 参照油猴脚本逻辑：422 代表校验失败 / 已签到等
         if status == 422:
             if (
                 "already checked in" in text_lower
@@ -275,10 +273,65 @@ class MJJBoxAutoCheckin:
             f"签到失败，HTTP 状态码：{status}，响应内容前 200 字：{text[:200]}",
         )
 
+    # ========== /checkin.json 获取积分信息 ==========
+
+    def fetch_checkin_status(self) -> dict:
+        """
+        调用 /checkin.json 获取签到详情：
+        - user_checkin_count : 总签到天数
+        - consecutive_days   : 连续签到天数
+        - today_checked_in   : 今天是否已签到
+        - checkin_history[0] : 最近一次签到记录（含 points_earned）
+        - current_points     : 当前总积分
+        """
+        session = requests.Session()
+        for c in self.driver.get_cookies():
+            try:
+                session.cookies.set(c["name"], c["value"])
+            except Exception:
+                continue
+
+        url = f"{self.base_url}/checkin.json"
+        logger.info(f"获取签到详情：{url}")
+
+        resp = session.get(url, headers={"Accept": "application/json"}, timeout=15)
+        resp.raise_for_status()
+
+        data = resp.json()
+
+        user_checkin_count = data.get("user_checkin_count")
+        consecutive_days = data.get("consecutive_days")
+        today_checked_in = data.get("today_checked_in")
+        current_points = data.get("current_points")
+        history = data.get("checkin_history") or []
+
+        # 取“最新的一天”的记录（保险起见按日期最大）
+        today_points = None
+        if history:
+            try:
+                latest = max(history, key=lambda h: h.get("date", ""))
+            except Exception:
+                latest = history[0]
+
+            today_points = latest.get("points_earned")
+
+        return {
+            "user_checkin_count": user_checkin_count,
+            "consecutive_days": consecutive_days,
+            "today_checked_in": today_checked_in,
+            "today_points": today_points,
+            "current_points": current_points,
+        }
+
     # ========== 外部调用的主流程 ==========
 
     def checkin(self) -> str:
-        """整体签到流程：登录 + 打开页面拿 CSRF + 调用 /checkin 接口"""
+        """
+        整体签到流程：
+        登录 + 打开页面拿 CSRF + 调用 /checkin 接口 + 查询 /checkin.json 补充分数信息
+
+        返回一段可直接用于日志/TG 的文本
+        """
         logger.info(f"开始为账号 {self.username} 签到")
 
         if not self.login():
@@ -293,37 +346,39 @@ class MJJBoxAutoCheckin:
 
         result_type, message = self.perform_checkin_request()
 
+        # 先生成基础结果文案
         if result_type == "success":
-            logger.info(f"签到成功：{message}")
-            return f"签到成功：{message}"
+            base_msg = f"签到成功：{message}"
         elif result_type == "duplicate":
-            logger.info(message)
-            return message
+            base_msg = message or "您今天已经签到过了"
         elif result_type == "auth":
-            logger.error(message)
             raise RuntimeError(message)
         else:
-            logger.error(message)
             raise RuntimeError(message)
 
-    # ========== Telegram 通知 ==========
-
-    def send_telegram(self, message: str) -> None:
-        if not self.telegram_bot_token or not self.telegram_chat_id:
-            return
-
+        # 再尝试补充积分信息
+        detail_text = ""
         try:
-            url = f"https://api.telegram.org/bot{self.telegram_bot_token}/sendMessage"
-            data = {
-                "chat_id": self.telegram_chat_id,
-                "text": message,
-                "parse_mode": "HTML",
-            }
-            resp = requests.post(url, data=data, timeout=10)
-            if resp.status_code != 200:
-                logger.warning(f"Telegram 推送失败：{resp.text}")
+            info = self.fetch_checkin_status()
+            if info.get("today_checked_in"):
+                today_points = info.get("today_points")
+                consecutive_days = info.get("consecutive_days")
+                user_checkin_count = info.get("user_checkin_count")
+                current_points = info.get("current_points")
+
+                detail_text = (
+                    f"今日获得 {today_points} 积分；"
+                    f"连续签到 {consecutive_days} 天，"
+                    f"总签到 {user_checkin_count} 天，"
+                    f"当前总积分 {current_points}"
+                )
         except Exception as e:
-            logger.warning(f"Telegram 推送异常: {e}")
+            logger.warning(f"获取签到详情失败，无法附加积分信息：{e}")
+
+        if detail_text:
+            return base_msg + "\n" + detail_text
+        else:
+            return base_msg
 
     # ========== 资源回收 ==========
 
@@ -369,6 +424,30 @@ def parse_accounts_from_env():
     return accounts
 
 
+# ========== Telegram 汇总推送 ==========
+
+def send_telegram_summary(message: str) -> None:
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+
+    if not bot_token or not chat_id:
+        logger.info("未配置 TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID，跳过 Telegram 推送")
+        return
+
+    try:
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        data = {
+            "chat_id": chat_id,
+            "text": message,
+            "parse_mode": "HTML",
+        }
+        resp = requests.post(url, data=data, timeout=10)
+        if resp.status_code != 200:
+            logger.warning(f"Telegram 推送失败：{resp.text}")
+    except Exception as e:
+        logger.warning(f"Telegram 推送异常: {e}")
+
+
 # ========== 主入口 ==========
 
 def main():
@@ -381,7 +460,10 @@ def main():
         )
         return
 
+    total_count = len(accounts)
+    success_count = 0
     overall_messages = []
+
     for idx, (user, pwd) in enumerate(accounts, start=1):
         logger.info("=" * 60)
         logger.info(f"开始处理第 {idx} 个账号：{user}")
@@ -389,10 +471,11 @@ def main():
         checker = MJJBoxAutoCheckin(user, pwd)
         try:
             result = checker.checkin()
-            msg = f"账号 {user} 签到成功：{result}"
+            success_count += 1
+            msg = f"✅ 账号 {user}：\n{result}"
             logger.info(msg)
         except Exception as e:
-            msg = f"账号 {user} 签到失败：{e}"
+            msg = f"❌ 账号 {user}：\n{e}"
             logger.error(msg)
         finally:
             checker.close()
@@ -401,22 +484,17 @@ def main():
         # 多账号间稍微停顿一下，避免太频繁
         time.sleep(5)
 
-    final_text = "MJJBOX 每日签到结果：\n" + "\n".join(overall_messages)
-    logger.info(final_text)
+    # 构造汇总消息（带 emoji，风格类似 Leaflow）
+    current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # 汇总结果推送 Telegram
-    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
-    if bot_token and chat_id:
-        try:
-            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-            requests.post(
-                url,
-                data={"chat_id": chat_id, "text": final_text},
-                timeout=10,
-            )
-        except Exception as e:
-            logger.warning(f"汇总结果 Telegram 推送失败: {e}")
+    summary = ""
+    summary += "🎁 MJJBOX 自动签到通知\n"
+    summary += f"📊 成功: {success_count}/{total_count}\n"
+    summary += f"📅 签到时间：{current_date}\n\n"
+    summary += "\n\n".join(overall_messages)
+
+    logger.info(summary)
+    send_telegram_summary(summary)
 
 
 if __name__ == "__main__":
