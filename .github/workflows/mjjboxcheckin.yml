@@ -1,8 +1,6 @@
 name: Mjjbox Auto Checkin
 
 on:
-  schedule:
-    - cron: '10 16 * * *' # 每天UTC时间16:10运行（北京时间00:10）
   workflow_dispatch:  # 允许手动触发
 
 jobs:
