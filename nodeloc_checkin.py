@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NodeLoc 多账号自动签到脚本
+NodeLoc 多账号自动签到脚本 (最终格式修正版)
 环境变量：
 NODELOC_ACCOUNTS: 账号:密码,账号2:密码2
 """
@@ -125,7 +125,6 @@ class NodeLocAutoCheckin:
             logger.info("等待2秒后获取积分详情...")
             time.sleep(2)
             
-            # 尝试动态获取积分页面URL
             try:
                 avatar_link = self.driver.find_element(By.CSS_SELECTOR, ".App-header-controls .Avatar").find_element(By.XPATH, "./..").get_attribute("href")
                 points_url = f"{avatar_link}/points-history/events"
@@ -149,32 +148,20 @@ class NodeLocAutoCheckin:
             checkin_time = "未知"
             
             try:
-                # 找到所有增加积分的行
                 positive_rows = self.driver.find_elements(By.CSS_SELECTOR, "tr.positive-points")
                 
                 if positive_rows:
-                    # 只检查第一行 (最新的记录)
                     first_row = positive_rows[0]
                     cols = first_row.find_elements(By.TAG_NAME, "td")
                     
                     if len(cols) >= 3:
-                        # 第三列 (索引2) 是原因列
                         reason_text = cols[2].text.strip()
-                        logger.info(f"最新一条正向积分记录原因: {reason_text}")
-                        
-                        # 只有当原因是"每日签到奖励"时才提取
                         if "每日签到奖励" in reason_text:
-                            # 第二列 (索引1) 是分数
                             score_span = cols[1].find_element(By.CSS_SELECTOR, ".positive")
                             today_reward = score_span.text.strip()
-                            
-                            # 第一列 (索引0) 是时间
                             time_span = cols[0].find_element(By.TAG_NAME, "span")
                             checkin_time = time_span.get_attribute("title")
-                            
                             logger.info(f"成功提取签到奖励: {today_reward}")
-                        else:
-                            logger.info("最新一条记录不是签到奖励，跳过提取")
             except Exception as e:
                 logger.warning(f"提取表格数据时出错: {e}")
             
@@ -192,18 +179,15 @@ class NodeLocAutoCheckin:
         try:
             logger.info(f"--- 开始处理账号: {self.username} ---")
             if self.login():
-                # 尝试签到
                 self.checkin()
-                
-                # 获取积分信息
                 info = self.get_points_info()
                 
                 if info:
                     if info['reward'] != "未知":
-                        result_msg = f"签到成功，您获得了 {info['reward']} 能量"
+                        # 这里的文案对应 "签到成功！您获得了 +5 能量"
+                        result_msg = f"签到成功！您获得了 {info['reward']} 能量"
                     else:
-                        result_msg = "今日已签到 (无今日新增记录)"
-                        
+                        result_msg = "今日已签到 (无新增记录)"
                     balance_msg = info['total']
                 else:
                     result_msg = "签到完成 (无法获取详情)"
@@ -240,22 +224,38 @@ class MultiAccountManager:
         if not self.telegram_bot_token or not self.telegram_chat_id:
             return
         
-        message = ""
+        # 1. 顶部统计信息
+        success_count = sum(1 for _, success, _, _ in results if success)
+        total_count = len(results)
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        
+        message = f"🤖 NodeLoc 自动签到报告\n"
+        message += f"📅 日期: {current_date}\n"
+        message += f"📊 统计: 成功 {success_count}/{total_count}\n\n"
+        
+        # 2. 账号详情
         for username, success, result, balance in results:
-            masked_user = username[:2] + "***"
+            # 隐藏部分用户名
+            masked_user = username[:2] + "***" if len(username) > 2 else username
+            
+            message += f"账号：{masked_user}\n"
+            
             if success:
-                message += f"✅ 账号：{masked_user}\n"
-                message += f"{result}\n"
+                message += f"✅ {result}\n"
                 message += f"💰 当前总能量：{balance}\n\n"
             else:
-                message += f"❌ 账号：{masked_user}\n"
-                message += f"执行失败: {result}\n\n"
+                message += f"❌ {result}\n"
+                message += f"💰 当前总能量：{balance}\n\n"
         
-        if message:
+        # 发送
+        try:
             requests.post(
                 f"https://api.telegram.org/bot{self.telegram_bot_token}/sendMessage",
                 data={"chat_id": self.telegram_chat_id, "text": message}
             )
+            logger.info("Telegram通知已发送")
+        except Exception as e:
+            logger.error(f"发送通知失败: {e}")
 
     def run_all(self):
         results = []
