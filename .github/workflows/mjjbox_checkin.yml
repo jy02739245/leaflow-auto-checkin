@@ -33,10 +33,21 @@ jobs:
         MJJBOX_PASSWORD: ${{ secrets.MJJBOX_PASSWORD }}
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        KUMA_PUSH_URL: ${{ secrets.KUMA_PUSH_LEAFLOW_URL }}
         GITHUB_ACTIONS: true
       run: |
         python mjjbox_checkin.py
-        EXEC_TIME=$(date -d "@$(( $(date +%s) - $(date +%s - 3600) ))" +%s)  # 简化计算
-        curl "${KUMA_PUSH_URL}&msg=Leaflow%20Checkin%20Done&ping=${EXEC_TIME}"
-        echo "✅ Push to Uptime Kuma: $(date)"
+    - name: Notify Uptime Kuma Push
+      env:
+        KUMA_PUSH_URL: ${{ secrets.KUMA_PUSH_LEAFLOW_URL }}
+      run: |
+        # 从 workflow 开始到现在的时间（秒）
+        START_TIME=${{ fromJson(github.event.inputs.start_time || '0') }}
+        CURRENT_TIME=$(date +%s)
+        EXEC_TIME=$((CURRENT_TIME - START_TIME))
+        
+        # 或者简单用 uptime
+        UPTIME=$(cat /proc/uptime | cut -d' ' -f1 | cut -d'.' -f1)
+        
+        curl "${KUMA_PUSH_URL}&msg=Leaflow%20Checkin%20Done&ping=${UPTIME}"
+        echo "✅ Push to Uptime Kuma (exec time: ${UPTIME}s): $(date)"
+
