@@ -30,6 +30,10 @@ jobs:
         NODELOC_ACCOUNTS: ${{ secrets.NODELOC_ACCOUNTS }}
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        KUMA_URL: ${{ secrets.KUMA_URL }}
+        KUMA_USER: ${{ secrets.KUMA_USER }}
+        KUMA_PASS: ${{ secrets.KUMA_PASS }}
         GITHUB_ACTIONS: true
       run: |
         python nodeloc_checkin.py
+        python schedule_next.py 10 60 18
