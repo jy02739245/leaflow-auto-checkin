@@ -33,7 +33,8 @@ jobs:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         KUMA_URL: ${{ secrets.KUMA_URL }}
-        KUMA_API_KEY: ${{ secrets.KUMA_API_KEY }}
+        KUMA_USER: ${{ secrets.KUMA_USER }}
+        KUMA_PASS: ${{ secrets.KUMA_PASS }}
         GITHUB_ACTIONS: true
       run: |
         python leaflow_checkin.py
