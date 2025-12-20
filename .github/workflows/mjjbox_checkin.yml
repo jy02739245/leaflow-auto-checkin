@@ -33,6 +33,10 @@ jobs:
         MJJBOX_PASSWORD: ${{ secrets.MJJBOX_PASSWORD }}
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        KUMA_PUSH_URL: ${{ secrets.KUMA_PUSH_LEAFLOW_URL }}
         GITHUB_ACTIONS: true
       run: |
         python mjjbox_checkin.py
+        EXEC_TIME=$(date -d "@$(( $(date +%s) - $(date +%s - 3600) ))" +%s)  # 简化计算
+        curl "${KUMA_PUSH_URL}&msg=Leaflow%20Checkin%20Done&ping=${EXEC_TIME}"
+        echo "✅ Push to Uptime Kuma: $(date)"
