@@ -1,4 +1,6 @@
 selenium==4.15.0
 requests==2.31.0
 pytz
+uptime-kuma-api
 webdriver-manager==4.0.1
+
