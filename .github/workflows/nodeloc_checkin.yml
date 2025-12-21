@@ -45,6 +45,6 @@ jobs:
         START_SEC=$(date -d "${WORKFLOW_STARTED_AT}" +%s 2>/dev/null || echo 0)
         EXEC_TIME=$((CURRENT_TIME - START_SEC))
         
-        curl "${KUMA_PUSH_URL}&status=up&msg=NodeLoc%20Checkin%20Done&ping=${EXEC_TIME}"
+        curl "${KUMA_PUSH_URL}&msg=OK&ping=${EXEC_TIME}"
         echo "✅ Push to Uptime Kuma (exec: ${EXEC_TIME}s): $(date)"
 
