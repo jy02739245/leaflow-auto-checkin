@@ -33,18 +33,4 @@ jobs:
         GITHUB_ACTIONS: true
       run: |
         python nodeloc_checkin.py
-    - name: Notify Uptime Kuma Push
-      env:
-        KUMA_PUSH_URL: ${{ secrets.KUMA_PUSH_NODELOC_URL }}
-      run: |
-        # GitHub 提供的 workflow 开始时间戳（Unix 时间）
-        WORKFLOW_STARTED_AT=${{ github.run_started_at }}
-        CURRENT_TIME=$(date +%s)
-        
-        # 转换为时间戳并计算差值
-        START_SEC=$(date -d "${WORKFLOW_STARTED_AT}" +%s 2>/dev/null || echo 0)
-        EXEC_TIME=$((CURRENT_TIME - START_SEC))
-        
-        curl "${KUMA_PUSH_URL}&msg=OK&ping=${EXEC_TIME}"
-        echo "✅ Push to Uptime Kuma (exec: ${EXEC_TIME}s): $(date)"
 
